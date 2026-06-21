@@ -13,7 +13,6 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.1",
     "pg": "^8.11.3",
-    "better-sqlite3": "^9.4.3",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "express-validator": "^7.0.1",
@@ -25,7 +24,6 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.5",
     "@types/pg": "^8.10.9",
-    "@types/better-sqlite3": "^7.6.9",
     "typescript": "^5.3.3",
     "tsx": "^4.7.0"
   }
