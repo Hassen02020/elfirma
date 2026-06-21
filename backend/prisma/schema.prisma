@@ -1,0 +1,248 @@
+// Prisma Schema pour EL FIRMA Caisse Management
+// Base de données: PostgreSQL (Neon)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============= ENTITÉS PRINCIPALES =============
+
+model User {
+  id        Int      @id @default(autoincrement())
+  nom       String   @db.VarChar(100)
+  role      UserRole
+  pinHash   String   @map("pin_hash") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+enum UserRole {
+  AGENT
+  CONTROLEUR
+  COMPTABLE
+  SUPER_ADMIN
+}
+
+model Chauffeur {
+  id                Int      @id @default(autoincrement())
+  nom               String   @db.VarChar(100)
+  prenom            String?  @db.VarChar(100)
+  codeEmploye       String   @unique @map("code_employe") @db.VarChar(50)
+  telephone         String?  @db.VarChar(20)
+  statut            ChauffeurStatut @default(ACTIF)
+  stockCaissesActuel Int      @default(0) @map("stock_caisses_actuel")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  camions    Camion[]
+  deliveries Delivery[]
+  caisses    Caisse[]
+  penalties  Penalty[]
+  rewards    Reward[]
+
+  @@index([codeEmploye])
+  @@map("chauffeurs")
+}
+
+enum ChauffeurStatut {
+  ACTIF
+  INACTIF
+  EN_CONGE
+}
+
+model Camion {
+  id          Int      @id @default(autoincrement())
+  serie       String   @unique @db.VarChar(50)
+  matricule   String   @unique @db.VarChar(50)
+  modele      String?  @db.VarChar(100)
+  chauffeurId Int?     @map("chauffeur_id")
+  capaciteMax Int      @default(100) @map("capacite_max")
+  statut      CamionStatut @default(ACTIF)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  chauffeur  Chauffeur? @relation(fields: [chauffeurId], references: [id])
+  deliveries Delivery[]
+  caisses    Caisse[]
+
+  @@index([serie])
+  @@map("camions")
+}
+
+enum CamionStatut {
+  ACTIF
+  INACTIF
+  EN_MAINTENANCE
+}
+
+model Delivery {
+  id                  Int       @id @default(autoincrement())
+  camionId            Int       @map("camion_id")
+  chauffeurId         Int       @map("chauffeur_id")
+  poidsVide           Decimal   @map("poids_vide") @db.Decimal(10, 2)
+  poidsCharge         Decimal   @map("poids_charge") @db.Decimal(10, 2)
+  poidsProduit        Decimal   @map("poids_produit") @db.Decimal(10, 2)
+  nbCaissesChargees   Int       @map("nb_caisses_chargees")
+  nbCaissesRetournees Int       @default(0) @map("nb_caisses_retournees")
+  signature           String?   @db.Text
+  statut              DeliveryStatut @default(EN_COURS)
+  type                DeliveryType @default(DEPART)
+  date                DateTime
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  camion    Camion @relation(fields: [camionId], references: [id])
+  chauffeur Chauffeur @relation(fields: [chauffeurId], references: [id])
+  caisses   Caisse[]
+  pesees    Pese[]
+
+  @@index([date])
+  @@index([chauffeurId])
+  @@map("deliveries")
+}
+
+enum DeliveryStatut {
+  EN_COURS
+  TERMINE
+  ANNULE
+}
+
+enum DeliveryType {
+  DEPART
+  RETOUR
+}
+
+model Caisse {
+  id          Int          @id @default(autoincrement())
+  numeroUnique String       @unique @map("numero_unique") @db.VarChar(50)
+  statut      CaisseStatut @default(EN_USINE)
+  camionId    Int?         @map("camion_id")
+  chauffeurId Int?         @map("chauffeur_id")
+  livraisonId Int?         @map("livraison_id")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  camion    Camion?    @relation(fields: [camionId], references: [id])
+  chauffeur Chauffeur? @relation(fields: [chauffeurId], references: [id])
+  delivery  Delivery?  @relation(fields: [livraisonId], references: [id])
+
+  @@index([statut])
+  @@index([chauffeurId])
+  @@map("caisses")
+}
+
+enum CaisseStatut {
+  EN_USINE
+  CHARGEE
+  LIVREE
+  RETOURNEE
+  EN_EXTERIEUR
+}
+
+model Pese {
+  id          Int       @id @default(autoincrement())
+  livraisonId Int       @map("livraison_id")
+  type        PeseType
+  poids       Decimal   @db.Decimal(10, 2)
+  horodatage  DateTime  @default(now())
+
+  // Relations
+  delivery Delivery @relation(fields: [livraisonId], references: [id])
+
+  @@map("pesees")
+}
+
+enum PeseType {
+  VIDE
+  CHARGE
+}
+
+model Stock {
+  id                   Int      @id @default(autoincrement())
+  date                 DateTime @db.Date
+  totalCaissesUsine    Int      @map("total_caisses_usine")
+  totalCaissesEnTransit Int      @map("total_caisses_en_transit")
+  stockReel            Int?     @map("stock_reel")
+  stockFictif          Int?     @map("stock_fictif")
+  ecart                Int?     @default(0)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@map("stocks")
+}
+
+model Penalty {
+  id                  Int           @id @default(autoincrement())
+  chauffeurId         Int           @map("chauffeur_id")
+  chauffeurNom        String        @map("chauffeur_nom") @db.VarChar(100)
+  caissesNonRetournees Int          @map("caisses_non_retournees")
+  coutParCaisse       Decimal       @map("cout_par_caisse") @db.Decimal(10, 2)
+  penaliteTotale      Decimal       @map("penalite_totale") @db.Decimal(10, 2)
+  remarque            String?       @db.Text
+  date                DateTime
+  statut              PenaltyStatut @default(EN_ATTENTE)
+  creePar             PenaltyCreePar @default(COMPTABLE) @map("cree_par")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  chauffeur Chauffeur @relation(fields: [chauffeurId], references: [id])
+
+  @@map("penalties")
+}
+
+enum PenaltyStatut {
+  EN_ATTENTE
+  VALIDEE
+  REJETEE
+}
+
+enum PenaltyCreePar {
+  COMPTABLE
+  ADMIN
+}
+
+model Reward {
+  id             Int          @id @default(autoincrement())
+  chauffeurId     Int          @map("chauffeur_id")
+  chauffeurNom    String       @map("chauffeur_nom") @db.VarChar(100)
+  montant         Decimal      @db.Decimal(10, 2)
+  motif           String?      @db.Text
+  date            DateTime
+  statut          RewardStatut @default(VALIDEE)
+  creePar         String       @default("admin") @map("cree_par")
+  moisEligibles   String[]     @map("mois_eligibles")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  chauffeur Chauffeur @relation(fields: [chauffeurId], references: [id])
+
+  @@map("rewards")
+}
+
+enum RewardStatut {
+  VALIDEE
+  REJETEE
+}
+
+model Signature {
+  id         Int      @id @default(autoincrement())
+  livraisonId Int      @map("livraison_id")
+  chauffeur  String   @db.Text
+  controleur String   @db.Text
+  date       DateTime @default(now())
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("signatures")
+}
