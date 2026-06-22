@@ -113,6 +113,8 @@ export default function AdminDashboardNew() {
       fetchRewards();
       fetchEligibleDrivers();
     }
+    if (activeTab === 'penalties') { fetchPenalties(); }
+    if (activeTab === 'rewards') { fetchRewards(); fetchEligibleDrivers(); }
     if (activeTab === 'deliveries' || activeTab === 'reports') {
       fetchAllDeliveries();
     }
@@ -341,7 +343,16 @@ export default function AdminDashboardNew() {
     }
   };
 
-  const renderOverview = () => (
+  const renderOverview = () => {
+    const totalCh = deliveries.reduce((s:number,d:any)=>s+(d.nb_caisses_chargees??0),0);
+    const totalRet = deliveries.reduce((s:number,d:any)=>s+(d.nb_caisses_retournees??0),0);
+    const tauxRetour = totalCh > 0 ? ((totalRet/totalCh)*100).toFixed(1) : '0';
+    const ecartTotal = Math.max(0, totalCh - totalRet);
+    const totalPenalites = penalties.reduce((s:number,p:any)=>s+(p.penalite_totale??0),0);
+    const totalRecompenses = rewards.reduce((s:number,r:any)=>s+(r.montant??0),0);
+    const nbDeparts = deliveries.filter((d:any)=>d.type==='depart').length;
+    const nbRetours = deliveries.filter((d:any)=>d.type==='retour').length;
+    return (
     <div>
       {/* Alertes de stock */}
       {alerts.alert_level !== 'normal' && (
@@ -381,6 +392,41 @@ export default function AdminDashboardNew() {
           </div>
           <p className="text-3xl font-bold text-gray-800">{deliveries.length}</p>
           <p className="text-sm text-gray-500 mt-1">livraisons effectuées</p>
+        </div>
+      </div>
+
+      {/* Ratios & KPIs analytiques */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        {[
+          { label: 'Taux retour caisses', val: `${tauxRetour}%`, sub: `${totalRet}/${totalCh}`, color: parseFloat(tauxRetour)>=95?'green':'red', bg: 'bg-green-50' },
+          { label: 'Écart caisses', val: ecartTotal, sub: 'manquantes', color: ecartTotal===0?'green':'red', bg: 'bg-red-50' },
+          { label: 'Total pénalités', val: `${totalPenalites} TND`, sub: `${penalties.length} pénalités`, color: 'red', bg: 'bg-orange-50' },
+          { label: 'Total récompenses', val: `${totalRecompenses} TND`, sub: `${rewards.length} récompenses`, color: 'green', bg: 'bg-yellow-50' },
+        ].map(k=>(
+          <div key={k.label} className={`${k.bg} rounded-xl p-4 shadow-sm`}>
+            <p className="text-xs text-gray-500 mb-1">{k.label}</p>
+            <p className={`text-2xl font-bold ${k.color==='green'?'text-green-700':'text-red-600'}`}>{k.val}</p>
+            <p className="text-xs text-gray-400 mt-1">{k.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Courbe activité — barres SVG */}
+      <div className="bg-white rounded-xl shadow-sm p-5 mb-6">
+        <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-elfirma-green"/>Activité du jour</h3>
+        <div className="flex items-end gap-3 h-28">
+          {[
+            { label: 'Départs', val: nbDeparts, max: Math.max(nbDeparts,nbRetours,1), color: 'bg-green-400' },
+            { label: 'Retours', val: nbRetours, max: Math.max(nbDeparts,nbRetours,1), color: 'bg-blue-400' },
+            { label: 'Pénalités', val: penalties.filter((p:any)=>p.statut==='en_attente').length, max: Math.max(penalties.length,1), color: 'bg-red-400' },
+            { label: 'Récompenses', val: rewards.filter((r:any)=>r.statut==='validee').length, max: Math.max(rewards.length,1), color: 'bg-yellow-400' },
+          ].map(b=>(
+            <div key={b.label} className="flex flex-col items-center gap-1 flex-1">
+              <span className="text-xs font-bold text-gray-700">{b.val}</span>
+              <div className={`w-full rounded-t-lg ${b.color}`} style={{height:`${Math.max((b.val/b.max)*80,4)}px`}}></div>
+              <span className="text-xs text-gray-500">{b.label}</span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -467,6 +513,28 @@ export default function AdminDashboardNew() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Résumé Pénalités & Récompenses — lien rapide */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-red-400">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500">Pénalités en attente</p>
+              <p className="text-2xl font-bold text-red-600">{penalties.filter((p:any)=>p.statut==='en_attente').length}</p>
+            </div>
+            <AlertTriangle className="w-8 h-8 text-red-300"/>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-yellow-400">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500">Récompenses validées</p>
+              <p className="text-2xl font-bold text-yellow-600">{rewards.filter((r:any)=>r.statut==='validee').length}</p>
+            </div>
+            <TrendingUp className="w-8 h-8 text-yellow-300"/>
+          </div>
+        </div>
       </div>
 
       {/* Gestion des Pénalités */}
@@ -751,6 +819,7 @@ export default function AdminDashboardNew() {
       </div>
     </div>
   );
+  };
 
   return (
     <DashboardLayout activeTab={activeTab} onTabChange={setActiveTab}>
@@ -776,15 +845,129 @@ export default function AdminDashboardNew() {
         <ReportsModule deliveries={allDeliveries} fetchAllDeliveries={fetchAllDeliveries} />
       )}
       {activeTab === 'penalties' && (
-        <div className="text-center py-12">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">Pénalités</h2>
-          <p className="text-gray-600">Utilisez l'onglet Vue d'ensemble pour gérer les pénalités</p>
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><AlertTriangle className="w-6 h-6 text-red-500"/>Gestion des Pénalités</h2>
+            <button onClick={()=>setShowPenaltyForm(!showPenaltyForm)}
+              className="flex items-center gap-2 bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-600">
+              <Package className="w-4 h-4"/>{showPenaltyForm?'Fermer':'Nouvelle Pénalité'}
+            </button>
+          </div>
+          {/* KPIs pénalités */}
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              {label:'Total',val:penalties.length,color:'gray'},
+              {label:'En attente',val:penalties.filter((p:any)=>p.statut==='en_attente').length,color:'yellow'},
+              {label:'Montant total',val:`${penalties.reduce((s:number,p:any)=>s+(p.penalite_totale??0),0)} TND`,color:'red'},
+            ].map(k=>(
+              <div key={k.label} className="bg-white rounded-xl shadow-sm p-4">
+                <p className="text-xs text-gray-500">{k.label}</p>
+                <p className={`text-2xl font-bold ${k.color==='red'?'text-red-600':k.color==='yellow'?'text-yellow-600':'text-gray-800'}`}>{k.val}</p>
+              </div>
+            ))}
+          </div>
+          {showPenaltyForm && (
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="font-bold text-gray-700 mb-4">Créer une Pénalité</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Chauffeur</label>
+                  <input type="text" value={newPenalty.chauffeur_nom||''} onChange={e=>setNewPenalty({...newPenalty,chauffeur_nom:e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="Nom du chauffeur"/></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Caisses non retournées</label>
+                  <input type="number" value={newPenalty.caisses_non_retournees||0} onChange={e=>setNewPenalty({...newPenalty,caisses_non_retournees:parseInt(e.target.value)||0,penalite_totale:(parseInt(e.target.value)||0)*(newPenalty.cout_par_caisse||10)})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"/></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Coût/caisse (TND)</label>
+                  <input type="number" value={newPenalty.cout_par_caisse||10} onChange={e=>setNewPenalty({...newPenalty,cout_par_caisse:parseFloat(e.target.value)||10,penalite_totale:(newPenalty.caisses_non_retournees||0)*(parseFloat(e.target.value)||10)})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"/></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                  <input type="date" value={newPenalty.date||''} onChange={e=>setNewPenalty({...newPenalty,date:e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"/></div>
+              </div>
+              <div className="mt-3"><label className="block text-sm font-medium text-gray-700 mb-1">Remarque</label>
+                <textarea value={newPenalty.remarque||''} onChange={e=>setNewPenalty({...newPenalty,remarque:e.target.value})} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"/></div>
+              <div className="mt-3 flex items-center justify-between bg-red-50 rounded-lg p-3">
+                <span className="text-sm font-medium text-gray-700">Pénalité totale</span>
+                <span className="text-xl font-bold text-red-600">{newPenalty.penalite_totale||0} TND</span>
+              </div>
+              <button onClick={createPenalty} className="mt-4 w-full bg-red-500 text-white py-2 rounded-lg font-medium hover:bg-red-600">Enregistrer la Pénalité</button>
+            </div>
+          )}
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>{['Date','Chauffeur','Caisses','Coût/u','Total','Statut','Actions'].map(h=><th key={h} className="px-4 py-3 text-left font-semibold">{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {penalties.length===0?(<tr><td colSpan={7} className="text-center py-8 text-gray-400">Aucune pénalité</td></tr>):penalties.map(p=>(
+                  <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-3">{new Date(p.date).toLocaleDateString('fr-TN')}</td>
+                    <td className="px-4 py-3 font-medium">{p.chauffeur_nom}</td>
+                    <td className="px-4 py-3 text-red-600 font-bold">{p.caisses_non_retournees}</td>
+                    <td className="px-4 py-3">{p.cout_par_caisse} TND</td>
+                    <td className="px-4 py-3 font-bold text-red-600">{p.penalite_totale} TND</td>
+                    <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.statut==='en_attente'?'bg-yellow-100 text-yellow-800':p.statut==='validee'?'bg-green-100 text-green-800':'bg-red-100 text-red-800'}`}>{p.statut==='en_attente'?'En attente':p.statut==='validee'?'Validée':'Rejetée'}</span></td>
+                    <td className="px-4 py-3">{p.statut==='en_attente'&&p.cree_par==='comptable'?(<div className="flex gap-1"><button onClick={()=>validatePenalty(p.id,'validee')} className="px-2 py-1 bg-green-500 text-white rounded text-xs">✓</button><button onClick={()=>validatePenalty(p.id,'rejetee')} className="px-2 py-1 bg-red-500 text-white rounded text-xs">✗</button></div>):'-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
       {activeTab === 'rewards' && (
-        <div className="text-center py-12">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">Récompenses</h2>
-          <p className="text-gray-600">Utilisez l'onglet Vue d'ensemble pour gérer les récompenses</p>
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><TrendingUp className="w-6 h-6 text-yellow-500"/>Gestion des Récompenses</h2>
+            <button onClick={()=>setShowRewardForm(!showRewardForm)}
+              className="flex items-center gap-2 bg-yellow-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-yellow-600">
+              <Package className="w-4 h-4"/>{showRewardForm?'Fermer':'Nouvelle Récompense'}
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              {label:'Total',val:rewards.length,color:'gray'},
+              {label:'Validées',val:rewards.filter((r:any)=>r.statut==='validee').length,color:'green'},
+              {label:'Montant total',val:`${rewards.reduce((s:number,r:any)=>s+(r.montant??0),0)} TND`,color:'yellow'},
+            ].map(k=>(
+              <div key={k.label} className="bg-white rounded-xl shadow-sm p-4">
+                <p className="text-xs text-gray-500">{k.label}</p>
+                <p className={`text-2xl font-bold ${k.color==='green'?'text-green-600':k.color==='yellow'?'text-yellow-600':'text-gray-800'}`}>{k.val}</p>
+              </div>
+            ))}
+          </div>
+          {showRewardForm && (
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="font-bold text-gray-700 mb-4">Créer une Récompense</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Chauffeur</label>
+                  <select value={newReward.chauffeur_id} onChange={e=>{const sel=eligibleDrivers.find((d:any)=>d.id===parseInt(e.target.value));setNewReward({...newReward,chauffeur_id:parseInt(e.target.value),chauffeur_nom:sel?.chauffeur_nom||'',mois_eligibles:sel?.mois_eligibles||[]});}} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                    <option value="">Sélectionner un chauffeur</option>
+                    {eligibleDrivers.map((d:any)=><option key={d.id} value={d.id}>{d.chauffeur_nom}</option>)}
+                  </select></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Montant (TND)</label>
+                  <input type="number" value={newReward.montant||0} onChange={e=>setNewReward({...newReward,montant:parseFloat(e.target.value)||0})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"/></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                  <input type="date" value={newReward.date||''} onChange={e=>setNewReward({...newReward,date:e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"/></div>
+              </div>
+              <div className="mt-3"><label className="block text-sm font-medium text-gray-700 mb-1">Motif</label>
+                <textarea value={newReward.motif||''} onChange={e=>setNewReward({...newReward,motif:e.target.value})} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"/></div>
+              <button onClick={createReward} className="mt-4 w-full bg-yellow-500 text-white py-2 rounded-lg font-medium hover:bg-yellow-600">Créer la Récompense</button>
+            </div>
+          )}
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>{['Date','Chauffeur','Montant','Motif','Statut'].map(h=><th key={h} className="px-4 py-3 text-left font-semibold">{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {rewards.length===0?(<tr><td colSpan={5} className="text-center py-8 text-gray-400">Aucune récompense</td></tr>):rewards.map(r=>(
+                  <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-3">{new Date(r.date).toLocaleDateString('fr-TN')}</td>
+                    <td className="px-4 py-3 font-medium">{r.chauffeur_nom}</td>
+                    <td className="px-4 py-3 font-bold text-yellow-600">{r.montant} TND</td>
+                    <td className="px-4 py-3 text-gray-500">{r.motif||'-'}</td>
+                    <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.statut==='validee'?'bg-green-100 text-green-800':'bg-red-100 text-red-800'}`}>{r.statut==='validee'?'Validée':'Rejetée'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </DashboardLayout>
