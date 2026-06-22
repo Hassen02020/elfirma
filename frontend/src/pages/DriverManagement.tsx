@@ -121,7 +121,7 @@ const DriverManagement: React.FC = () => {
           INACTIF: { color: 'bg-gray-100 text-gray-800', icon: XCircle },
           EN_CONGE: { color: 'bg-yellow-100 text-yellow-800', icon: Clock }
         };
-        const config = statusConfig[value as keyof typeof statusConfig];
+        const config = statusConfig[value as keyof typeof statusConfig] || { color: 'bg-gray-100 text-gray-800', icon: XCircle };
         const Icon = config.icon;
         return (
           <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${config.color}`}>
