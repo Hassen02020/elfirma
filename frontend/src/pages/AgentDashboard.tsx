@@ -681,16 +681,6 @@ export default function AgentDashboard() {
 
       <main className="max-w-4xl mx-auto px-4 py-8">
 
-        {/* ── Alertes temps réel (écart poids / litige caisses) ── */}
-        {alertes.length > 0 && (
-          <div className="mb-5">
-            <AlerteBanner
-              alertes={alertes}
-              role="agent"
-              agentId={agent?.id}
-            />
-          </div>
-        )}
 
 
         {/* Panneau d'alertes écarts caisses */}
