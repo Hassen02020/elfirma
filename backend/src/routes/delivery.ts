@@ -27,6 +27,31 @@ router.post('/', async (req, res) => {
   const poids_net = Math.max(0, poids_charge - (poids_vide + poids_caisses));
 
   try {
+    // Logique de blocage : pour le retour, vérifier que le départ a été validé
+    if (type === 'retour' && camion_id) {
+      const departCheck = await pool.query(
+        `SELECT * FROM deliveries 
+         WHERE camion_id = $1 
+         AND type = 'depart' 
+         AND statut_validation != 'VALIDE'
+         ORDER BY date DESC 
+         LIMIT 1`,
+        [camion_id]
+      );
+
+      if (departCheck.rows.length > 0) {
+        const depart = departCheck.rows[0];
+        return res.status(403).json({
+          success: false,
+          error: 'BLOCAGE: Le départ de ce camion n\'a pas été validé par le contrôleur',
+          statut_validation: depart.statut_validation,
+          ecart: depart.ecart,
+          livraison_id: depart.id,
+          message: 'Veuillez contacter le contrôleur pour valider le départ avant de procéder au retour'
+        });
+      }
+    }
+
     const result = await pool.query(
       `INSERT INTO deliveries
        (camion_id, chauffeur_id, poids_vide, poids_charge, poids_produit,

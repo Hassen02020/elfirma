@@ -18,6 +18,7 @@ import agentRoutes from './routes/agent';
 import finDeMoisRoutes from './routes/finDeMois';
 import validationRoutes from './routes/validation';
 import stockVolailleRoutes from './routes/stockVolaille';
+import peseeRoutes from './routes/pesee';
 import v1Router from './routes/v1/index';
 
 dotenv.config();
@@ -58,6 +59,7 @@ app.use('/api/agent',       agentRoutes);
 app.use('/api/fin-de-mois', finDeMoisRoutes);
 app.use('/api/validation',     validationRoutes);
 app.use('/api/stock-volaille', stockVolailleRoutes);
+app.use('/api/pesee',          peseeRoutes);
 app.use('/api/v1',             v1Router);
 
 app.get('/api/health', (_req, res) => {

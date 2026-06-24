@@ -10,25 +10,24 @@ export default function AgentDashboard() {
   const { logout, agent } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<'depart' | 'retour'>('depart');
-  const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     camionId: '',
     chauffeurId: '',
-    poidsVide: '',
-    poidsCharge: '',
     nbCaissesChargees: '',
     nbCaissesRetournees: '',
+    poidsFacture: '',
+    poidsPese: '',
+    poidsVide: '',
+    poidsCharge: '',
     poidsCaisses: '',
-    poidsProduit: '10',
-    indicePoids: '0.7',
+    poidsProduit: '',
     date: new Date().toISOString().split('T')[0],
     heure: new Date().toLocaleTimeString('fr-TN', { hour: '2-digit', minute: '2-digit' }),
   });
   const [submissionStatus, setSubmissionStatus] = useState<'idle' | 'pending' | 'success'>('idle');
-  const [departEnAttente, setDepartEnAttente] = useState<{[key: string]: {nbCaisses: string, date: string, camionId: string, chauffeurId: string, poidsVide: string, poidsCharge: string, poidsProduit: string} | null}>({});
+  const [departEnAttente, setDepartEnAttente] = useState<{[key: string]: {nbCaisses: string, date: string, camionId: string, chauffeurId: string, poidsFacture: string, poidsVide: string, poidsCharge: string, poidsProduit: string} | null}>({});
   const [historiqueLivraisons, setHistoriqueLivraisons] = useState<{[key: string]: {depart: any, retour: any, ecart: number, validee: boolean}}>({});
   const [blockageMessage, setBlockageMessage] = useState('');
-  const [erreurPoids, setErreurPoids] = useState<'inferieur' | 'egal' | null>(null);
 
   type EcartRecord = {
     chauffeurNom: string;
@@ -98,13 +97,6 @@ export default function AgentDashboard() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Bloquer si poids incohérents
-    const pv = parseFloat(formData.poidsVide) || 0;
-    const pc = parseFloat(formData.poidsCharge) || 0;
-    if (pv > 0 && pc > 0 && pc < pv) {
-      setBlockageMessage(`⚠️ Le poids après chargement (${pc} kg) ne peut pas être inférieur au poids à vide (${pv} kg). Vérifiez les pesées.`);
-      return;
-    }
 
     // Bloquer la soumission si le camion a un départ en attente
     if (mode === 'depart' && formData.camionId && departEnAttente[formData.camionId]) {
@@ -134,6 +126,7 @@ export default function AgentDashboard() {
           date: formData.date,
           camionId: formData.camionId,
           chauffeurId: formData.chauffeurId,
+          poidsFacture: formData.poidsFacture,
           poidsVide: formData.poidsVide,
           poidsCharge: formData.poidsCharge,
           poidsProduit: formData.poidsProduit
@@ -144,31 +137,58 @@ export default function AgentDashboard() {
     // Pour le mode retour: l'historique et la libération du départ
     // sont gérés par validerRetour() appelée après impression (onafterprint)
     // On ne touche pas à departEnAttente ici pour éviter le double traitement
+
+    // Utiliser le nouvel endpoint de validation de pesée pour le mode depart
+    const endpoint = mode === 'depart' ? '/api/pesee/valider-sortie' : '/api/delivery';
     
-    // Soumettre au backend
-    const payload = {
-      camion_id: parseInt(formData.camionId),
-      chauffeur_id: parseInt(formData.chauffeurId) || null,
-      poids_vide: parseFloat(formData.poidsVide) || 0,
-      poids_charge: parseFloat(formData.poidsCharge) || 0,
-      poids_caisses: (parseFloat(formData.poidsCaisses) || 0) * (parseInt(formData.nbCaissesChargees) || 0),
-      poids_produit: parseFloat(formData.poidsProduit) || 0,
-      nb_caisses_chargees: parseInt(formData.nbCaissesChargees) || 0,
-      nb_caisses_retournees: parseInt(formData.nbCaissesRetournees) || 0,
-      type: mode,
-      agent_id: agent?.id || null,
-      poste_id: agent?.poste_id || null,
-    };
+    // Payload adapté selon l'endpoint
+    const payload = mode === 'depart' 
+      ? {
+          camion_id: parseInt(formData.camionId),
+          chauffeur_id: parseInt(formData.chauffeurId) || null,
+          agent_id: agent?.id || null,
+          poste_id: agent?.poste_id || null,
+          poids_vide: 0, // À saisir dans une phase précédente
+          poids_charge: parseFloat(formData.poidsPese) || 0,
+          poids_factures: parseFloat(formData.poidsFacture) || 0,
+          nb_caisses_chargees: parseInt(formData.nbCaissesChargees) || 0,
+          type: mode,
+        }
+      : {
+          camion_id: parseInt(formData.camionId),
+          chauffeur_id: parseInt(formData.chauffeurId) || null,
+          poids_facture: parseFloat(formData.poidsFacture) || 0,
+          poids_pese: parseFloat(formData.poidsPese) || 0,
+          nb_caisses_chargees: parseInt(formData.nbCaissesChargees) || 0,
+          nb_caisses_retournees: parseInt(formData.nbCaissesRetournees) || 0,
+          type: mode,
+          agent_id: agent?.id || null,
+          poste_id: agent?.poste_id || null,
+        };
 
     try {
-      const res = await fetch(`${API_BASE}/api/delivery`, {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
         body: JSON.stringify(payload),
       });
-      const livraison = await res.json();
+      const response = await res.json();
+
+      // Gérer les erreurs de blocage
+      if (!res.ok && response.error && response.error.includes('BLOCAGE')) {
+        setBlockageMessage(response.error);
+        setSubmissionStatus('idle');
+        return;
+      }
+
+      const livraison = response.livraison || response;
       const livId = livraison?.id ?? null;
       setLivraisonIdCourant(livId);
+
+      // Si alerte générée, afficher un message
+      if (response.alerte) {
+        setBlockageMessage(`⚠️ ${response.alerte.message}. En attente de validation par le contrôleur.`);
+      }
 
       setSubmissionStatus('success');
     } catch {
@@ -180,21 +200,10 @@ export default function AgentDashboard() {
     }, 3000);
   };
 
-  const handleNext = () => {
-    if (mode === 'depart' && step < 2) setStep(step + 1);
-    if (mode === 'retour' && step < 1) setStep(step + 1);
-  };
-
-  const handleBack = () => {
-    if (step > 1) setStep(step - 1);
-  };
 
   const handleModeChange = (newMode: 'depart' | 'retour') => {
     setMode(newMode);
-    setStep(1);
     setBlockageMessage('');
-    setErreurPoids(null);
-    
     setCaissesLaissees([]);
 
     if (newMode === 'retour' && formData.camionId && departEnAttente[formData.camionId]) {
@@ -204,11 +213,9 @@ export default function AgentDashboard() {
         nbCaissesChargees: departData.nbCaisses,
         camionId: prev.camionId,
         chauffeurId: prev.chauffeurId,
-        poidsVide: '',
-        poidsCharge: '',
         nbCaissesRetournees: '',
-        poidsCaisses: '',
-        poidsProduit: '10',
+        poidsFacture: departData.poidsFacture,
+        poidsPese: '',
         date: new Date().toISOString().split('T')[0],
         heure: new Date().toLocaleTimeString('fr-TN', { hour: '2-digit', minute: '2-digit' }),
       }));
@@ -216,13 +223,14 @@ export default function AgentDashboard() {
       setFormData({
         camionId: '',
         chauffeurId: '',
-        poidsVide: '',
-        poidsCharge: '',
         nbCaissesChargees: '',
         nbCaissesRetournees: '',
+        poidsFacture: '',
+        poidsPese: '',
+        poidsVide: '',
+        poidsCharge: '',
         poidsCaisses: '',
-        poidsProduit: '10',
-        indicePoids: '0.7',
+        poidsProduit: '',
         date: new Date().toISOString().split('T')[0],
         heure: new Date().toLocaleTimeString('fr-TN', { hour: '2-digit', minute: '2-digit' }),
       });
@@ -263,37 +271,16 @@ export default function AgentDashboard() {
     }
   };
 
-  const calculerPoidsNet = () => {
-    const poidsCharge    = parseFloat(formData.poidsCharge) || 0;
-    const poidsVide      = parseFloat(formData.poidsVide) || 0;
-    const poidsUnitaire  = parseFloat(formData.poidsCaisses) || 0;
-    const nbCaisses      = parseInt(formData.nbCaissesChargees) || 0;
-    const poidsNet = poidsCharge - (poidsVide + poidsUnitaire * nbCaisses);
-    return poidsNet.toFixed(2);
+  const calculerEcartCaisses = () => {
+    const chargees = parseInt(formData.nbCaissesChargees) || 0;
+    const retournees = parseInt(formData.nbCaissesRetournees) || 0;
+    return chargees - retournees;
   };
 
-  const handlePoidsChange = (field: 'poidsVide' | 'poidsCharge', value: string) => {
-    setFormData(prev => {
-      const updated = { ...prev, [field]: value };
-      const pv = field === 'poidsVide' ? parseFloat(value) || 0 : parseFloat(prev.poidsVide) || 0;
-      const pc = field === 'poidsCharge' ? parseFloat(value) || 0 : parseFloat(prev.poidsCharge) || 0;
-      // Validation métier : poids chargé doit être >= poids vide
-      if (pc > 0 && pv > 0) {
-        if (pc < pv)        setErreurPoids('inferieur');
-        else if (pc === pv) setErreurPoids('egal');
-        else                setErreurPoids(null);
-      } else {
-        setErreurPoids(null);
-      }
-      if (mode === 'depart') {
-        const pCaisses = parseFloat(prev.poidsCaisses) || 0;
-        const poidsNet = pc - (pv + pCaisses);
-        const indice = parseFloat(prev.indicePoids) || 0.7;
-        const nbCaisses = poidsNet > 0 ? Math.floor(poidsNet / indice) : 0;
-        updated.nbCaissesChargees = nbCaisses.toString();
-      }
-      return updated;
-    });
+  const calculerEcartPoids = () => {
+    const facture = parseFloat(formData.poidsFacture) || 0;
+    const pese = parseFloat(formData.poidsPese) || 0;
+    return facture - pese;
   };
 
   const imprimerLivrableDepart = () => {
@@ -363,7 +350,7 @@ export default function AgentDashboard() {
             <div class="info"><span class="info-label">Poids après chargement:</span> <b>${formData.poidsCharge} kg</b></div>
             <div class="info"><span class="info-label">Poids unitaire caisse:</span> ${formData.poidsCaisses || '0'} kg × ${formData.nbCaissesChargees || '0'} = <b>${((parseFloat(formData.poidsCaisses)||0)*(parseInt(formData.nbCaissesChargees)||0)).toFixed(2)} kg</b></div>
             <div class="info"><span class="info-label">Caisses chargées:</span> <b style="font-size:15px;color:#1b5e20">${formData.nbCaissesChargees}</b></div>
-            <div class="info" style="color:#1b5e20;font-weight:bold"><span class="info-label">Poids net produit:</span> <b style="font-size:15px">${calculerPoidsNet()} kg</b></div>
+            <div class="info" style="color:#1b5e20;font-weight:bold"><span class="info-label">Poids net produit:</span> <b style="font-size:15px">${((parseFloat(formData.poidsCharge)||0) - (parseFloat(formData.poidsVide)||0) - ((parseFloat(formData.poidsCaisses)||0)*(parseInt(formData.nbCaissesChargees)||0))).toFixed(2)} kg</b></div>
           </div>
 
           ${affectationHtml}
@@ -399,6 +386,7 @@ export default function AgentDashboard() {
         date: formData.date,
         camionId: formData.camionId,
         chauffeurId: formData.chauffeurId,
+        poidsFacture: formData.poidsFacture,
         poidsVide: formData.poidsVide,
         poidsCharge: formData.poidsCharge,
         poidsProduit: formData.poidsProduit
@@ -409,18 +397,18 @@ export default function AgentDashboard() {
     setFormData({
       camionId: '',
       chauffeurId: '',
-      poidsVide: '',
-      poidsCharge: '',
       nbCaissesChargees: '',
       nbCaissesRetournees: '',
+      poidsFacture: '',
+      poidsPese: '',
+      poidsVide: '',
+      poidsCharge: '',
       poidsCaisses: '',
-      poidsProduit: '10',
-      indicePoids: '0.7',
+      poidsProduit: '',
       date: new Date().toISOString().split('T')[0],
       heure: new Date().toLocaleTimeString('fr-TN', { hour: '2-digit', minute: '2-digit' }),
     });
     setBlockageMessage('');
-    setErreurPoids(null);
   };
 
   const imprimerLivrableRetour = () => {
@@ -619,18 +607,18 @@ export default function AgentDashboard() {
     setFormData({
       camionId: '',
       chauffeurId: '',
-      poidsVide: '',
-      poidsCharge: '',
       nbCaissesChargees: '',
       nbCaissesRetournees: '',
+      poidsFacture: '',
+      poidsPese: '',
+      poidsVide: '',
+      poidsCharge: '',
       poidsCaisses: '',
-      poidsProduit: '10',
-      indicePoids: '0.7',
+      poidsProduit: '',
       date: new Date().toISOString().split('T')[0],
       heure: new Date().toLocaleTimeString('fr-TN', { hour: '2-digit', minute: '2-digit' }),
     });
     setBlockageMessage('');
-    setErreurPoids(null);
   };
 
 
@@ -774,10 +762,9 @@ export default function AgentDashboard() {
             <div className="flex items-center gap-2 mb-4">
               {mode === 'depart' && (
                 <>
-                  <div className={`w-3 h-3 rounded-full ${step >= 1 ? 'bg-elfirma-green' : 'bg-gray-300'}`} />
-                  <div className={`w-3 h-3 rounded-full ${step >= 2 ? 'bg-elfirma-green' : 'bg-gray-300'}`} />
+                  <div className="w-3 h-3 rounded-full bg-elfirma-green" />
                   <span className="text-sm text-gray-600">
-                    {step === 1 ? 'Étape 1: Pesée à vide' : 'Étape 2: Chargement'}
+                    Pesée de départ
                   </span>
                 </>
               )}
@@ -812,469 +799,159 @@ export default function AgentDashboard() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {mode === 'depart' && step === 1 && (
-              <div className="space-y-4">
-                {/* Sélection camion — matricule + chauffeur uniquement */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    🚛 Matricule camion
-                  </label>
-                  <select
-                    value={formData.camionId}
-                    onChange={(e) => handleCamionChange(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-elfirma-green focus:border-transparent text-base font-medium"
-                    required
-                  >
-                    <option value="">— Sélectionner un camion —</option>
-                    {camionsList.length > 0
-                      ? camionsList.map(c => (
-                          <option key={c.id} value={c.id}>
-                            {c.matricule}{c.chauffeur_nom ? ` — ${c.chauffeur_nom}${c.chauffeur_prenom ? ' ' + c.chauffeur_prenom : ''}` : ''}
-                          </option>
-                        ))
-                      : (
-                          <>
-                            <option value="1">190 TN 1234 — Ahmed Ben Ali</option>
-                            <option value="2">190 TN 5678 — Mohamed Trabelsi</option>
-                            <option value="3">190 TN 9012 — Sami Bouazizi</option>
-                          </>
-                        )
-                    }
-                  </select>
-                </div>
-
-                {/* Panneau affectation logistique automatique */}
-                {formData.camionId && tourneeDuJour && (
-                  <div className="border border-green-300 bg-green-50 rounded-xl px-4 py-2 text-xs text-green-800">
-                    📋 Tournée #{tourneeDuJour.id} — {tourneeDuJour.secteur_nom} · {tourneeDuJour.nb_caisses_total} caisses affectées
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Scale className="w-4 h-4 inline mr-2" />
-                    Poids à vide (kg)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.poidsVide}
-                    onChange={(e) => handlePoidsChange('poidsVide', e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-elfirma-green focus:border-transparent"
-                    placeholder="Ex: 2500.00"
-                    required
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Poids du camion vide avant chargement</p>
-                </div>
-              </div>
-            )}
-
-            {mode === 'depart' && step === 2 && (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Scale className="w-4 h-4 inline mr-2" />
-                    Poids après chargement (kg)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.poidsCharge}
-                    onChange={(e) => handlePoidsChange('poidsCharge', e.target.value)}
-                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:border-transparent ${
-                      erreurPoids === 'inferieur'
-                        ? 'border-red-500 bg-red-50 focus:ring-red-400'
-                        : erreurPoids === 'egal'
-                        ? 'border-amber-400 bg-amber-50 focus:ring-amber-400'
-                        : 'border-gray-300 focus:ring-elfirma-green'
-                    }`}
-                    placeholder="Ex: 3200.00"
-                    required
-                  />
-                  {/* Feedback validation poids */}
-                  {erreurPoids === 'inferieur' && (
-                    <div className="mt-2 flex items-start gap-2 bg-red-50 border border-red-300 rounded-lg px-3 py-2">
-                      <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-xs font-bold text-red-700">Erreur de pesée — valeur impossible</p>
-                        <p className="text-xs text-red-600">
-                          Poids après chargement ({formData.poidsCharge} kg) &lt; Poids à vide ({formData.poidsVide} kg).<br/>
-                          Un camion chargé ne peut pas peser moins qu'à vide.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  {erreurPoids === 'egal' && (
-                    <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-xs font-bold text-amber-700">Attention — Camion parti à vide</p>
-                        <p className="text-xs text-amber-600">
-                          Poids avant = Poids après ({formData.poidsCharge} kg). Aucun produit ni caisse chargé.
-                          Confirmez si c'est intentionnel.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  {!erreurPoids && formData.poidsVide && formData.poidsCharge && parseFloat(formData.poidsCharge) > parseFloat(formData.poidsVide) && (
-                    <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                      <CheckCircle className="w-3.5 h-3.5" />
-                      Charge nette : {(parseFloat(formData.poidsCharge) - parseFloat(formData.poidsVide)).toFixed(2)} kg ✓
-                    </p>
-                  )}
-                </div>
-
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Scale className="w-4 h-4 inline mr-2" />
-                    Poids unitaire d'une caisse vide (kg)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.poidsCaisses}
-                    onChange={(e) => setFormData({ ...formData, poidsCaisses: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-elfirma-green focus:border-transparent"
-                    placeholder="Ex: 2.10"
-                    required
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Poids d'une seule caisse vide — sera multiplié par le nombre de caisses</p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Package className="w-4 h-4 inline mr-2" />
-                    Nombre de caisses chargées
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.nbCaissesChargees}
-                    onChange={(e) => setFormData({ ...formData, nbCaissesChargees: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-elfirma-green focus:border-transparent"
-                    placeholder="Saisir le nombre de caisses"
-                    required
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Nombre total de caisses chargées selon factures fournies</p>
-                </div>
-
-                <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-                  <p className="text-xs text-blue-500 mb-1">Formule : Poids après chargement − (Poids à vide + Poids unitaire caisse × Nb caisses)</p>
-                  <p className="text-sm text-gray-700">
-                    {formData.poidsCharge || '?'} − ({formData.poidsVide || '?'} + <span className="text-green-700 font-medium">{formData.poidsCaisses || '?'}</span> × <span className="text-green-700 font-medium">{formData.nbCaissesChargees || '?'}</span>) =&nbsp;
-                    <span className="font-bold text-blue-700 text-base">{calculerPoidsNet()} kg</span>
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">Poids net produit livré</p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={imprimerLivrableDepart}
-                  className="w-full bg-elfirma-gold text-gray-800 py-3 rounded-lg font-semibold hover:bg-yellow-500 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Printer className="w-5 h-5" />
-                  Valider et Imprimer livrable de départ
-                </button>
-              </div>
-            )}
-
-            {mode === 'retour' && (
-              <div className="space-y-4">
-                {/* Sélection camion */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    🚛 Matricule camion
-                  </label>
-                  <select
-                    value={formData.camionId}
-                    onChange={(e) => handleCamionChange(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-elfirma-green focus:border-transparent text-base font-medium"
-                    required
-                  >
-                    <option value="">— Sélectionner un camion —</option>
-                    <option value="1">190 TN 1234 — Ahmed Ben Ali</option>
-                    <option value="2">190 TN 5678 — Mohamed Trabelsi</option>
-                    <option value="3">190 TN 9012 — Sami Bouazizi</option>
-                  </select>
-                </div>
-
-                {/* Référence départ : nb caisses chargées (verrouillé) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Package className="w-4 h-4 inline mr-1" />
-                    Caisses chargées au départ (référence agent pesée)
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.nbCaissesChargees}
-                    disabled
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-bold text-lg cursor-not-allowed"
-                    placeholder="Aucun départ enregistré pour ce camion"
-                  />
-                  {formData.nbCaissesChargees
-                    ? <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle className="w-3 h-3"/>Chargé depuis le bon de départ signé</p>
-                    : <p className="text-xs text-orange-500 mt-1">⚠ Sélectionner un camion avec un départ enregistré</p>
-                  }
-                </div>
-
-                {/* Affectation logistique de la tournée (référence commande départ) */}
-                {tourneeDuJour && (() => {
-                  const lignes = tourneeDuJour.lignes || [];
-                  const totalAffecte = lignes.reduce((s, l) => s + l.nb_caisses, 0);
-                  return (
-                    <div className="border-2 border-blue-300 rounded-xl overflow-hidden">
-                      <div className="bg-blue-600 text-white px-4 py-2 flex items-center justify-between">
-                        <span className="font-bold text-sm">📋 Commande logistique — Référence tournée #{tourneeDuJour.id}</span>
-                        <span className="text-xs opacity-90">{tourneeDuJour.secteur_nom}</span>
-                      </div>
-                      <div className="p-3 bg-blue-50">
-                        <p className="text-xs text-blue-700 mb-2 font-medium">
-                          Caisses affectées par l'agent logistique : <strong className="text-base text-blue-900">{totalAffecte}</strong> — ces caisses restent chez les clients et justifient l'écart.
-                        </p>
-                        <table className="w-full text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-blue-100">
-                              <th className="border border-blue-200 px-2 py-1.5 text-left text-blue-700">Client</th>
-                              <th className="border border-blue-200 px-2 py-1.5 text-left text-blue-700">📞</th>
-                              <th className="border border-blue-200 px-2 py-1.5 text-center text-blue-700">Caisses laissées</th>
-                              <th className="border border-blue-200 px-2 py-1.5 text-center text-blue-700">Récupérées ✓</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {lignes.map((l, i) => {
-                              const cLaissee = caissesLaissees.find(cl => cl.client_nom === l.client_nom && !cl.autre);
-                              return (
-                                <tr key={i} className="bg-white">
-                                  <td className="border border-blue-100 px-2 py-1.5 font-medium">{l.client_nom}</td>
-                                  <td className="border border-blue-100 px-2 py-1.5 text-blue-600">{l.telephone || '—'}</td>
-                                  <td className="border border-blue-100 px-2 py-1.5 text-center font-bold text-blue-800">{l.nb_caisses}</td>
-                                  <td className="border border-blue-100 px-2 py-1.5 text-center">
-                                    <input
-                                      type="number" min="0" max={l.nb_caisses}
-                                      value={cLaissee?.nb_caisses ?? ''}
-                                      onChange={e => {
-                                        const val = parseInt(e.target.value) || 0;
-                                        setCaissesLaissees(prev => {
-                                          const exists = prev.find(cl => cl.client_nom === l.client_nom && !cl.autre);
-                                          if (exists) {
-                                            return prev.map(cl => cl.client_nom === l.client_nom && !cl.autre ? {...cl, nb_caisses: val} : cl);
-                                          }
-                                          return [...prev, {
-                                            secteur_id: 0, secteur_nom: tourneeDuJour.secteur_nom || '',
-                                            client_id: i + 1, client_nom: l.client_nom,
-                                            telephone: l.telephone || '', adresse: l.adresse || '',
-                                            nb_caisses: val, autre: false
-                                          }];
-                                        });
-                                      }}
-                                      placeholder="0"
-                                      className="w-16 px-1.5 py-1 text-center text-sm font-bold border-2 border-blue-300 rounded focus:ring-1 focus:ring-blue-500"
-                                    />
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                            <tr className="bg-blue-50 font-bold">
-                              <td colSpan={2} className="border border-blue-200 px-2 py-1.5 text-blue-800">TOTAL LOGISTIQUE</td>
-                              <td className="border border-blue-200 px-2 py-1.5 text-center text-blue-900">{totalAffecte}</td>
-                              <td className="border border-blue-200 px-2 py-1.5 text-center text-green-700">
-                                {caissesLaissees.filter(cl=>!cl.autre).reduce((s,cl)=>s+cl.nb_caisses,0)}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Nb caisses retournées */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Package className="w-4 h-4 inline mr-1" />
-                    Caisses retournées à l'usine (pesée retour)
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.nbCaissesRetournees}
-                    onChange={(e) => setFormData({ ...formData, nbCaissesRetournees: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-elfirma-green focus:border-transparent text-lg font-bold"
-                    placeholder="Ex: 95"
-                    required
-                  />
-                </div>
-
-                {/* Bilan écart avec justification logistique */}
-                {formData.nbCaissesChargees && formData.nbCaissesRetournees && (() => {
-                  const nbCharge    = parseInt(formData.nbCaissesChargees) || 0;
-                  const nbRetourne  = parseInt(formData.nbCaissesRetournees) || 0;
-                  const ecart       = nbCharge - nbRetourne;
-                  // Caisses justifiées par l'affectation logistique
-                  const caissesLogistique = (tourneeDuJour?.lignes || []).reduce((s, l) => s + l.nb_caisses, 0);
-                  // Caisses saisies manuellement comme laissées (hors logistique)
-                  const totalSaisi  = caissesLaissees.reduce((s, c) => s + c.nb_caisses, 0);
-                  // Bilan justification
-                  const justifieLogistique = Math.min(ecart > 0 ? ecart : 0, caissesLogistique);
-                  const nonJustifie = Math.max(0, ecart - totalSaisi);
-                  return (
-                    <>
-                      {/* Bilan écart vs commande logistique */}
-                      <div className={`rounded-xl border-2 p-4 space-y-3 ${
-                        ecart === 0 ? 'bg-green-50 border-green-300' :
-                        nonJustifie === 0 ? 'bg-blue-50 border-blue-300' :
-                        'bg-red-50 border-red-300'
-                      }`}>
-                        <div className="flex items-start gap-2">
-                          {ecart === 0
-                            ? <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0"/>
-                            : nonJustifie === 0
-                            ? <CheckCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0"/>
-                            : <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0"/>}
-                          <div className="flex-1">
-                            <p className={`font-bold text-sm ${ecart === 0 ? 'text-green-700' : nonJustifie === 0 ? 'text-blue-700' : 'text-red-700'}`}>
-                              {ecart === 0
-                                ? '✓ Retour complet — aucun écart'
-                                : nonJustifie === 0
-                                ? `✓ Écart de ${ecart} caisse${ecart>1?'s':''} — entièrement justifié par la commande logistique`
-                                : `⚠ ${nonJustifie} caisse${nonJustifie>1?'s':''} non justifiée${nonJustifie>1?'s':''} — à expliquer`}
-                            </p>
-                            {ecart > 0 && (
-                              <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-center">
-                                <div className="bg-white rounded-lg p-2 border">
-                                  <div className="font-bold text-gray-800 text-base">{nbCharge}</div>
-                                  <div className="text-gray-500">Chargées</div>
-                                </div>
-                                <div className="bg-white rounded-lg p-2 border">
-                                  <div className="font-bold text-green-700 text-base">{nbRetourne}</div>
-                                  <div className="text-gray-500">Retournées</div>
-                                </div>
-                                <div className={`rounded-lg p-2 border ${nonJustifie === 0 ? 'bg-blue-100' : 'bg-red-100'}`}>
-                                  <div className={`font-bold text-base ${nonJustifie === 0 ? 'text-blue-800' : 'text-red-700'}`}>{ecart}</div>
-                                  <div className="text-gray-500">Écart</div>
-                                </div>
-                              </div>
-                            )}
-                            {ecart > 0 && caissesLogistique > 0 && (
-                              <p className="text-xs mt-2 text-blue-700">
-                                Commande logistique : <strong>{caissesLogistique}</strong> caisses affectées aux clients &nbsp;|&nbsp;
-                                Justifié : <strong>{justifieLogistique}</strong> &nbsp;|&nbsp;
-                                Non justifié : <strong className={nonJustifie > 0 ? 'text-red-700' : 'text-green-700'}>{nonJustifie}</strong>
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Clients hors tournée (écart résiduel non couvert par la logistique) */}
-                        {ecart > 0 && nonJustifie > 0 && (
-                          <div className="border-t border-red-200 pt-3">
-                            <div className="flex items-center justify-between mb-2">
-                              <p className="text-xs font-semibold text-red-700">
-                                Caisses hors tournée — saisir le(s) client(s) concerné(s)
-                              </p>
-                              <button type="button"
-                                onClick={() => setCaissesLaissees(prev => [...prev, {
-                                  secteur_id: 0, secteur_nom: '', client_id: -Date.now(),
-                                  client_nom: '', telephone: '', adresse: '', nb_caisses: 0, autre: true
-                                }])}
-                                className="text-xs bg-red-600 text-white px-2.5 py-1 rounded-lg hover:bg-red-700 flex items-center gap-1"
-                              >
-                                <Plus className="w-3 h-3"/> Ajouter
-                              </button>
-                            </div>
-                            {caissesLaissees.filter(l => l.autre).map((ligne) => {
-                              const idx = caissesLaissees.indexOf(ligne);
-                              return (
-                                <div key={ligne.client_id} className="bg-white border border-red-200 rounded-lg p-2.5 mb-2">
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <input type="text" placeholder="Nom client *"
-                                      value={ligne.client_nom}
-                                      onChange={e => setCaissesLaissees(prev => prev.map((l,j) => j===idx ? {...l, client_nom: e.target.value} : l))}
-                                      className="col-span-2 px-2 py-1.5 text-xs border border-red-200 rounded font-medium"/>
-                                    <input type="tel" placeholder="📞 Téléphone"
-                                      value={ligne.telephone}
-                                      onChange={e => setCaissesLaissees(prev => prev.map((l,j) => j===idx ? {...l, telephone: e.target.value} : l))}
-                                      className="px-2 py-1.5 text-xs border border-red-200 rounded"/>
-                                    <input type="text" placeholder="📍 Adresse"
-                                      value={ligne.adresse}
-                                      onChange={e => setCaissesLaissees(prev => prev.map((l,j) => j===idx ? {...l, adresse: e.target.value} : l))}
-                                      className="px-2 py-1.5 text-xs border border-red-200 rounded"/>
-                                    <input type="number" min="1" placeholder="Nb caisses"
-                                      value={ligne.nb_caisses || ''}
-                                      onChange={e => setCaissesLaissees(prev => prev.map((l,j) => j===idx ? {...l, nb_caisses: parseInt(e.target.value)||0} : l))}
-                                      className="px-2 py-1.5 text-xs font-bold border-2 border-red-300 rounded text-center"/>
-                                    <button type="button"
-                                      onClick={() => setCaissesLaissees(prev => prev.filter((_,j) => j!==idx))}
-                                      className="text-xs text-red-400 hover:text-red-600 flex items-center gap-1 justify-center">
-                                      <Trash2 className="w-3 h-3"/> Supprimer
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  );
-                })()}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Signature
-                  </label>
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center text-gray-500">
-                    Zone de signature numérique
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={imprimerLivrableRetour}
-                  className="w-full bg-elfirma-gold text-gray-800 py-3 rounded-lg font-semibold hover:bg-yellow-500 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Printer className="w-5 h-5" />
-                  Valider et Imprimer livrable de retour
-                </button>
-              </div>
-            )}
-
-            <div className="flex gap-4 pt-4">
-              {mode === 'depart' && step > 1 && (
-                <button
-                  type="button"
-                  onClick={handleBack}
-                  className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors"
-                >
-                  Retour
-                </button>
-              )}
-              {mode === 'depart' && step < 2 ? (
-                <button
-                  type="button"
-                  onClick={handleNext}
-                  className="flex-1 bg-elfirma-green text-white py-3 rounded-lg font-semibold hover:bg-elfirma-darkGreen transition-colors flex items-center justify-center gap-2"
-                >
-                  Suivant
-                  <ArrowRight className="w-5 h-5" />
-                </button>
-              ) : mode === 'depart' ? (
-                <button
-                  type="submit"
-                  className="flex-1 bg-elfirma-green text-white py-3 rounded-lg font-semibold hover:bg-elfirma-darkGreen transition-colors flex items-center justify-center gap-2"
-                >
-                  <CheckCircle className="w-5 h-5" />
-                  Valider le départ
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  className="flex-1 bg-elfirma-green text-white py-3 rounded-lg font-semibold hover:bg-elfirma-darkGreen transition-colors flex items-center justify-center gap-2"
-                >
-                  <CheckCircle className="w-5 h-5" />
-                  Valider le retour
-                </button>
-              )}
+            {/* Sélection camion */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                🚛 Matricule camion
+              </label>
+              <select
+                value={formData.camionId}
+                onChange={(e) => handleCamionChange(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-elfirma-green focus:border-transparent text-base font-medium"
+                required
+              >
+                <option value="">— Sélectionner un camion —</option>
+                {camionsList.length > 0
+                  ? camionsList.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.matricule}{c.chauffeur_nom ? ` — ${c.chauffeur_nom}${c.chauffeur_prenom ? ' ' + c.chauffeur_prenom : ''}` : ''}
+                      </option>
+                    ))
+                  : (
+                      <>
+                        <option value="1">190 TN 1234 — Ahmed Ben Ali</option>
+                        <option value="2">190 TN 5678 — Mohamed Trabelsi</option>
+                        <option value="3">190 TN 9012 — Sami Bouazizi</option>
+                      </>
+                    )
+                }
+              </select>
             </div>
+
+            {/* Vue à 2 colonnes : Départ / Retour */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Colonne Départ */}
+              <div className={`rounded-xl p-5 border-2 ${mode === 'depart' ? 'border-elfirma-green bg-green-50' : 'border-gray-200 bg-gray-50'}`}>
+                <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <ArrowRight className="w-5 h-5 text-elfirma-green" />
+                  Départ
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <Package className="w-4 h-4 inline mr-1" />
+                      Caisses chargées
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.nbCaissesChargees}
+                      onChange={(e) => setFormData({ ...formData, nbCaissesChargees: e.target.value })}
+                      disabled={mode === 'retour'}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-elfirma-green focus:border-transparent"
+                      placeholder="Nombre de caisses"
+                      required={mode === 'depart'}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <Scale className="w-4 h-4 inline mr-1" />
+                      Poids selon facture (kg)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.poidsFacture}
+                      onChange={(e) => setFormData({ ...formData, poidsFacture: e.target.value })}
+                      disabled={mode === 'retour'}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-elfirma-green focus:border-transparent"
+                      placeholder="Poids facture"
+                      required={mode === 'depart'}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Colonne Retour */}
+              <div className={`rounded-xl p-5 border-2 ${mode === 'retour' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-gray-50'}`}>
+                <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <ArrowRight className="w-5 h-5 text-blue-500 rotate-180" />
+                  Retour
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <Package className="w-4 h-4 inline mr-1" />
+                      Caisses retournées
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.nbCaissesRetournees}
+                      onChange={(e) => setFormData({ ...formData, nbCaissesRetournees: e.target.value })}
+                      disabled={mode === 'depart'}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Nombre de caisses"
+                      required={mode === 'retour'}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <Scale className="w-4 h-4 inline mr-1" />
+                      Poids pesé (kg)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.poidsPese}
+                      onChange={(e) => setFormData({ ...formData, poidsPese: e.target.value })}
+                      disabled={mode === 'depart'}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Poids pesé"
+                      required={mode === 'retour'}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Calculs écarts */}
+            {mode === 'retour' && formData.nbCaissesChargees && formData.nbCaissesRetournees && (
+              <div className="bg-white rounded-xl p-4 border border-gray-200">
+                <h4 className="font-bold text-gray-700 mb-3">Écarts calculés</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className={`p-3 rounded-lg ${calculerEcartCaisses() > 0 ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
+                    <p className="text-xs text-gray-500">Écart caisses</p>
+                    <p className={`text-xl font-bold ${calculerEcartCaisses() > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {calculerEcartCaisses()} {calculerEcartCaisses() > 0 ? 'manquantes' : 'OK'}
+                    </p>
+                  </div>
+                  <div className={`p-3 rounded-lg ${Math.abs(calculerEcartPoids()) > 5 ? 'bg-orange-50 border border-orange-200' : 'bg-green-50 border border-green-200'}`}>
+                    <p className="text-xs text-gray-500">Écart poids</p>
+                    <p className={`text-xl font-bold ${Math.abs(calculerEcartPoids()) > 5 ? 'text-orange-600' : 'text-green-600'}`}>
+                      {calculerEcartPoids().toFixed(2)} kg
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Bouton de soumission */}
+            <button
+              type="submit"
+              disabled={submissionStatus === 'pending'}
+              className="w-full bg-elfirma-green text-white py-3 rounded-lg font-semibold hover:bg-elfirma-darkGreen transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {submissionStatus === 'pending' ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Traitement...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-5 h-5" />
+                  {mode === 'depart' ? 'Enregistrer le départ' : 'Enregistrer le retour'}
+                </>
+              )}
+            </button>
           </form>
         </div>
       </main>

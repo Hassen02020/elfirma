@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, XCircle, LogOut, Package, AlertTriangle, Calendar, TrendingUp, TrendingDown, Truck, Sun, Moon, Scale, MapPin, ClipboardList, Users, BarChart3, RefreshCw, Bell, Thermometer, Box, Download, Printer } from 'lucide-react';
 import AlerteBanner from '../components/AlerteBanner';
+import AlertesPeseePanel from '../components/AlertesPeseePanel';
 import { useAlertes } from '../hooks/useAlertes';
 import { useStockVolaille } from '../hooks/useStockVolaille';
 
@@ -496,6 +497,9 @@ export default function ControllerDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
+
+        {/* Panneau alertes de pesée — visible pour les contrôleurs */}
+        <AlertesPeseePanel />
 
         {/* Bannière alertes temps réel — visible sur tous les onglets */}
         {alertes.length > 0 && (

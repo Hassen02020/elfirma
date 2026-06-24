@@ -123,10 +123,16 @@ CREATE TABLE IF NOT EXISTS deliveries (
   poids_caisses         DECIMAL(10,2) DEFAULT 0,
   poids_produit         DECIMAL(10,2) DEFAULT 0,
   poids_net             DECIMAL(10,2) DEFAULT 0,
+  poids_factures        DECIMAL(10,2) DEFAULT 0,           -- Somme des poids selon factures
+  ecart                 DECIMAL(10,2) DEFAULT 0,           -- Écart calculé : (poids_charge - poids_vide) - poids_factures
   nb_caisses_chargees   INTEGER      NOT NULL DEFAULT 0,
   nb_caisses_retournees INTEGER      DEFAULT 0,
   signature             TEXT,
   statut                VARCHAR(20)  DEFAULT 'TERMINE' CHECK (statut IN ('EN_COURS','TERMINE','ANNULE','validee','rejetee')),
+  statut_validation     VARCHAR(20)  DEFAULT 'VALIDE' CHECK (statut_validation IN ('VALIDE','EN_ATTENTE','REJETE')), -- Validation de la pesée
+  controleur_id         INTEGER      REFERENCES agents(id), -- Contrôleur qui valide
+  controleur_commentaire TEXT,                              -- Commentaire du contrôleur
+  alerte_envoyee        BOOLEAN      DEFAULT false,        -- Indique si l'alerte a été envoyée
   type                  VARCHAR(10)  DEFAULT 'depart'  CHECK (type IN ('depart','retour')),
   date                  TIMESTAMP    NOT NULL DEFAULT NOW(),
   created_at            TIMESTAMP    DEFAULT NOW(),
@@ -420,10 +426,10 @@ ON CONFLICT DO NOTHING;
 INSERT INTO agents (nom, prenom, code_agent, poste_id, role) VALUES
   ('Hamdi',     'Ali',      '1111', 1, 'agent'),
   ('Maaloul',   'Sonia',    '1122', 1, 'agent'),
-  ('Chaouch',   'Karim',    '1133', 1, 'controleur'),
+  ('Lounissi',  'Said',     '1133', 1, 'controleur'),
   ('Ferchichi', 'Nizar',    '2211', 2, 'agent'),
   ('Belhadj',   'Rim',      '2222', 2, 'agent'),
-  ('Nasri',     'Anouar',   '2233', 2, 'controleur'),
+  ('Lounissi',  'Said',     '2233', 2, 'controleur'),
   ('Admin',     'Comptable','3333', 1, 'comptable'),
   ('Brahmi',    'Logistique','4444',1, 'logistique')
 ON CONFLICT (code_agent) DO NOTHING;
