@@ -105,6 +105,7 @@ app.get('/', (req, res) => {
       v1_retours:  '/api/v1/retours',
       v1_bilan:    '/api/v1/chauffeurs/bilan-mensuel',
       v1_sse:      '/api/v1/events/stream',
+      pesee:       '/api/pesee',
     },
     documentation: 'Consultez /api/health pour le catalogue complet'
   });
